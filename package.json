@@ -1,0 +1,7 @@
+{
+  "name": "racetrack",
+  "version": "0.0.1",
+  "description": "Tracks racey conditions through callback hell",
+  "main": "racetrack.js",
+  "readme": "# racetrack\n\nNo tests, but I'm pretty sure it does what I think."
+}
