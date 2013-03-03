@@ -1,7 +1,7 @@
 {
   "name": "racetrack",
-  "version": "0.0.2",
-  "description": "Tracks racey conditions through callback hell",
+  "version": "0.0.3",
+  "description": "Call chains and race condition tracking in callback hell.",
   "main": "racetrack.js",
   "devDependencies": {
     "besync": "0.0.2",

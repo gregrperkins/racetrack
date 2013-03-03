@@ -47,7 +47,7 @@ racetrack.log = function () {
 racetrack.trace = function(obj, cb, name, var_args) {
   var track = racetrack._getTrack(obj);
   var count = track.calls.length;
-  var args = [].slice.call(arguments, 2);
+  var args = [].slice.call(arguments, 3);
   var call = new Call(track.id, count, name, args);
   track.calls.push(call);
 
@@ -62,7 +62,7 @@ racetrack.trace = function(obj, cb, name, var_args) {
 
 
   // Return the wrapped callback, which completes our Call when called
-  return function(){
+  var wrapped = function(){
     if (call.done) {
       console.error('Multiple calls to the same callback. Bug!');
     }
@@ -73,6 +73,9 @@ racetrack.trace = function(obj, cb, name, var_args) {
 
     cb.apply(null, arguments);
   }.bind(obj);
+  wrapped.call = call;
+
+  return wrapped;
 };
 
 /**
@@ -252,13 +255,34 @@ Track.unwrap = function (track) {
   track.unwrap();
 };
 
-Track.wrapper = function (obj, name, oldFns) {
-  return function () {
+Track.wrapper = function (obj, name, backups) {
+  var calls = [];
+  // backups[name][1] = bool indicating locality
+  var realFn = backups[name][0];
+  var wrapped = function () {
     var args = [].slice.call(arguments);
-    var cb = args[args.length - 1];
-    args[args.length - 1] = racetrack.trace(obj, cb, name);
-    return oldFns[name][0].apply(this, args);
+    var cb = args.pop();
+    // Ensure the last argument is a callback
+    if (typeof cb !== 'function') {
+      // Otherwise bail out.
+      return realFn.apply(this, arguments);
+    }
+
+    // Collect the arguments and extras for the call trace
+    var traceArgs = [obj, cb, name].concat(args);
+    // Start the call trace (this registers an outstanding call)
+    var trace = racetrack.trace.apply(this, traceArgs);
+    // Restore the trace end as the function's callback param
+    args.push(trace);
+
+    // Retain the call info from the trace
+    calls.push(trace.call);
+
+    return realFn.apply(this, args);
   };
+  // Annotate the function with the retained call info
+  wrapped.calls = calls;
+  return wrapped;
 };
 
 /**
@@ -312,7 +336,9 @@ Call.prototype.descr_ = function(opt_indent) {
 };
 
 Call.prototype.startStr = function(opt_indent) {
-  return this.descr_(opt_indent) + ' ' + this.args.join(' ');
+  return this.descr_(opt_indent) +
+    (this.args.length ? ' ' : '') +
+    this.args.join(' ');
 };
 
 Call.prototype.endStr = function(opt_indent) {

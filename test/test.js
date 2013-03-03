@@ -41,26 +41,26 @@ describe('racetrack', function () {
   });
 
   var singleMergedLog = [
-    ['[0:0:init] init'],
-    ['[1:0:init] init'],
-    ['[1:1:thing1] thing1'],
+    ['[0:0:init]'],
+    ['[1:0:init]'],
+    ['[1:1:thing1]'],
     ['[1:1:thing1] done.'],
-    ['[1:2:thing2] thing2'],
+    ['[1:2:thing2] random'],
     ['[1:2:thing2] done.'],
     ['[1:0:init] done.'],
     ['[0:0:init] done.'],
   ];
 
   var singleOuterLog = [
-    ['[0:0:init] init'],
+    ['[0:0:init]'],
     ['[0:0:init] done.'],
   ];
 
   var singleInnerLog = [
-    ['[1:0:init] init'],
-    ['[1:1:thing1] thing1'],
+    ['[1:0:init]'],
+    ['[1:1:thing1]'],
     ['[1:1:thing1] done.'],
-    ['[1:2:thing2] thing2'],
+    ['[1:2:thing2] random'],
     ['[1:2:thing2] done.'],
     ['[1:0:init] done.'],
   ];
@@ -100,24 +100,24 @@ describe('racetrack', function () {
 
 
   var doubleMergedLog = singleMergedLog.concat([
-    ['[0:1:init] init'],
-    ['[1:3:init] init'],
-    ['[1:4:thing1] thing1'],
+    ['[0:1:init]'],
+    ['[1:3:init]'],
+    ['[1:4:thing1]'],
     ['[1:4:thing1] done.'],
-    ['[1:5:thing2] thing2'],
+    ['[1:5:thing2] random'],
     ['[1:5:thing2] done.'],
     ['[1:3:init] done.'],
     ['[0:1:init] done.'],
   ]);
   var doubleOuterLog = singleOuterLog.concat([
-    ['[0:1:init] init'],
+    ['[0:1:init]'],
     ['[0:1:init] done.'],
   ]);
   var doubleInnerLog = singleInnerLog.concat([
-    ['[1:3:init] init'],
-    ['[1:4:thing1] thing1'],
+    ['[1:3:init]'],
+    ['[1:4:thing1]'],
     ['[1:4:thing1] done.'],
-    ['[1:5:thing2] thing2'],
+    ['[1:5:thing2] random'],
     ['[1:5:thing2] done.'],
     ['[1:3:init] done.'],
   ]);
@@ -190,7 +190,7 @@ describe('racetrack', function () {
 
     // Simulate beginning a function but not actually making the callback
     tc.sub.thing2 = function (next) {
-      racetrack.trace(this, next, 'thing2');
+      racetrack.trace(this, next, 'thing2', 'fake');
 
       // We could just checkCompletion() here
       process.nextTick(checkCompletion);
@@ -201,11 +201,11 @@ describe('racetrack', function () {
 
     function checkCompletion() {
       out.should.eql([
-        ['[0:0:init] init'],
-        ['[1:0:init] init'],
-        ['[1:1:thing1] thing1'],
+        ['[0:0:init]'],
+        ['[1:0:init]'],
+        ['[1:1:thing1]'],
         ['[1:1:thing1] done.'],
-        ['[1:2:thing2] thing2'],
+        ['[1:2:thing2] fake'],
       ]);
       out = [];
 
@@ -214,18 +214,45 @@ describe('racetrack', function () {
       out.shift().should.eql([ '1 incomplete calls in TestClass.' ]);
       var tcIncs = out.shift();
       tcIncs.should.have.length(1);
-      tcIncs[0]['args'].should.eql(['init']);
+      tcIncs[0]['args'].should.eql([]);
 
       out.shift().should.eql([ '2 incomplete calls in TestChildClass.' ]);
       var tccIncs = out.shift();
       tccIncs.should.have.length(1);
-      tccIncs[0]['args'].should.eql(['init']);
+      tccIncs[0]['args'].should.eql([]);
       tccIncs = out.shift();
       tccIncs.should.have.length(1);
-      tccIncs[0]['args'].should.eql(['thing2']);
+      tccIncs[0]['args'].should.eql(['fake']);
 
       done();
     };
   });
 
-})
+  it('tracks and annotates function calls', function (done) {
+    var tc = new TestClass();
+    var tracks = racetrack.configure([tc, tc.sub]);
+    tc.init(function () {
+      should.exist(tc.init.calls);
+      tc.init.calls.should.have.length(1);
+
+      should.exist(tc.sub.thing2.calls);
+      tc.sub.thing2.calls.should.have.length(1);
+      tc.sub.thing2.calls[0].args.should.eql(['random']);
+
+      tc.init(function () {
+        should.exist(tc.init.calls);
+        tc.init.calls.should.have.length(2);
+
+        should.exist(tc.sub.thing2.calls);
+        tc.sub.thing2.calls.should.have.length(2);
+        tc.sub.thing2.calls[1].args.should.eql(['random']);
+
+        // Ensure that resetting blows away the function calls annotations
+        racetrack.reset();
+        should.not.exist(tc.init.calls);
+        done();
+      })
+    });
+  });
+
+});
