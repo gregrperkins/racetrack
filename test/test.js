@@ -191,12 +191,15 @@ describe('racetrack', function () {
     // Simulate beginning a function but not actually making the callback
     tc.sub.thing2 = function (next) {
       racetrack.trace(this, next, 'thing2');
+
+      // We could just checkCompletion() here
+      process.nextTick(checkCompletion);
     };
     tc.init(function () {
       done(new Error('should not have called back. This should be hanging.'));
     });
 
-    setTimeout(function () {
+    function checkCompletion() {
       out.should.eql([
         ['[0:0:init] init'],
         ['[1:0:init] init'],
@@ -222,7 +225,7 @@ describe('racetrack', function () {
       tccIncs[0]['args'].should.eql(['thing2']);
 
       done();
-    });
+    };
   });
 
 })
