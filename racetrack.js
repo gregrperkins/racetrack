@@ -1,15 +1,34 @@
 var racetrack = exports;
 
 /**
+ * A counter for the tracks; increases after each new track.
+ */
+racetrack.__trackCount = 0;
+
+/**
  * A list of tracked objects, and their tracking configurations.
  * @type {Array.<{obj: Object, print: boolean, name: ?string}>}
  */
 var allTracks;
 
 racetrack.reset = function() {
+  allTracks && allTracks.forEach(Track.unwrap);
   allTracks = [];
 };
 racetrack.reset();
+racetrack.resetThen = function (fn) {
+  return function () {
+    racetrack.reset();
+    fn.apply(this, arguments);
+  }
+};
+
+/**
+ * console.log proxy for debugging purposes.
+ */
+racetrack.log = function () {
+  console.log.apply(console, arguments);
+};
 
 /**
  * Traces an async function call, allowing us to note the
@@ -29,20 +48,18 @@ racetrack.trace = function(obj, cb, name, var_args) {
   var track = racetrack._getTrack(obj);
   var count = track.calls.length;
   var args = [].slice.call(arguments, 2);
-  var call = new Call(count, name, args);
+  var call = new Call(track.id, count, name, args);
   track.calls.push(call);
 
-  if (track.printCallbacks) {
-    // Print what callback we are wrapping.
-    console.log('callback @ ' + call.descr + ' = ' + cb);
-  }
-  if (track.print) {
-    // Print when we are starting a function body
-    console.log(call.startStr(track.indent));
-  }
+  // Print what callback we are wrapping.
+  track.logCallback('callback @ ' + call.descr + ' = ' + cb);
+  // Print when we are starting a function body
+  track.logCall(call.startStr(track.indent));
+
   if (track.stacktraces) {
     call.stack = new Error().stack.slice(5);
   }
+
 
   // Return the wrapped callback, which completes our Call when called
   return function(){
@@ -50,11 +67,9 @@ racetrack.trace = function(obj, cb, name, var_args) {
       console.error('Multiple calls to the same callback. Bug!');
     }
 
+    track.logCall(call.endStr(track.indent));
     call.done = true;
-
-    if (track.print) {
-      console.log(call.endStr(track.indent));
-    }
+    // console.log('ending ' + call.descr);
 
     cb.apply(null, arguments);
   }.bind(obj);
@@ -71,22 +86,28 @@ racetrack.traceholder = function (obj, cb) {
 };
 
 /**
- * @
+ * @param {Object|Array.<Object>} objs
  */
-racetrack.configure = function(obj, opts) {
-  var track = racetrack._getTrack(obj);
-
-  opts = opts || {};
-  track.print = !!opts.print;
-  track.printCallbacks = !!opts.printCallbacks;
-  track.name = opts.name || track.name;
-  track.stacktraces = !!opts.stacktraces;
-  track.indent = opts.indent || 0;
-
-  if (obj.trace) {
-    obj.trace = racetrack.trace;
+racetrack.configure = function(objs, opts) {
+  if (!Array.isArray(objs)) {
+    objs = [objs];
   }
+  return objs.map(function (obj) {
+    var track = racetrack._getTrack(obj);
+
+    opts = opts || {};
+    track.print = !!opts.print;
+    track.printCallbacks = !!opts.printCallbacks;
+    track.name = opts.name || track.name;
+    track.stacktraces = !!opts.stacktraces;
+    track.indent = opts.indent || 0;
+    track.fns = opts.fns;
+    track.wrap();
+
+    return track;
+  });
 };
+
 
 /**
  * Prints a report of any incomplete calls made.
@@ -117,12 +138,12 @@ racetrack.report = function(opts) {
     var num = incomplete.length;
     if (num || opts.showOK) {
       var sum = (num ? num : 'No');
-      console.log(sum + ' incomplete calls in ' + track.obj + '.');
+      racetrack.log(sum + ' incomplete calls in ' + track.obj + '.');
     }
 
     // print all the incomplete calls
     incomplete.forEach(function(call) {
-      console.log(call);
+      racetrack.log(call);
     });
   }
 };
@@ -153,21 +174,137 @@ racetrack._getTrack = function(obj) {
   return new Track(obj);
 };
 
+/**
+ * Register in a mocha bdd test case
+ * This is very much not ideal yet, since the object needs to be created
+ *  *outside* of the actual function under test.
+ */
+racetrack.mochaHook = function(obj, cfg) {
+  beforeEach(function() {
+    if (obj) {
+      racetrack.configure(obj, cfg);
+    }
+  });
+
+  afterEach(function() {
+    racetrack.report();
+    racetrack.reset();
+  });
+};
+
+
+
+/**
+ * A Track represents a classy object that is being tracked.
+ * We wrap all its method functions with tracers, and are prepared to
+ *  unwrap at any time.
+ *
+ * @param {Object} obj
+ */
 var Track = function(obj) {
+  this.id = racetrack.__trackCount++;
   this.obj = obj;
+  this.backups = {};
   allTracks.push(this);
   this.clear();
 };
 
 Track.prototype.clear = function() {
   this.calls = [];
+  this.logs = [];
 };
 
-var Call = function(idNum, name, args) {
+Track.prototype.log = function () {
+  this.logs.push([].slice.call(arguments));
+  racetrack.log.apply(this, arguments);
+};
+
+Track.prototype.logCall = function (str) {
+  this.logs.push([str]);
+  if (this.print) {
+    racetrack.log(str);
+  }
+};
+Track.prototype.logCallback = function (str) {
+  if (this.printCallbacks) {
+    this.log(str);
+  }
+};
+
+Track.prototype.unwrap = function () {
+  var key;
+  for (key in this.backups) {
+    var backup = this.backups[key];
+    var isLocal = backup[1];
+    var fn = backup[0];
+
+    if (isLocal) {
+      // this.obj.hasOwnProperty(key) was true when wrapping
+      this.obj[key] = fn;
+    } else {
+      // The property came from the prototype
+      delete this.obj[key];
+    }
+  }
+};
+
+Track.unwrap = function (track) {
+  track.unwrap();
+};
+
+Track.wrapper = function (obj, name, oldFns) {
+  return function () {
+    var args = [].slice.call(arguments);
+    var cb = args[args.length - 1];
+    args[args.length - 1] = racetrack.trace(obj, cb, name);
+    return oldFns[name][0].apply(this, args);
+  };
+};
+
+/**
+ * Wrap the given object, ensuring that it will provide real output messages
+ *  when appropriate.
+ */
+Track.prototype.wrap = function () {
+  var obj = this.obj;
+  var fnSpec = this.fns || {};
+  var backups = racetrack._getTrack(obj).backups;
+
+  var x;
+  for (x in obj) {
+    var cur = obj[x];
+    if (
+      // It is not a function
+      'function' !== typeof cur ||
+      // We have an explicit false flag for this function name
+      fnSpec[x] === false ||
+      // We have already wrapped this function
+      backups[x]
+    ) {
+      // Skip this property.
+      continue;
+    }
+
+    // Make the replacement for explicit true flag or when > 0 args accepted
+    if (fnSpec[x] === true || cur.length) {
+      // Need to retain whether this function was defined locally or not
+      //  in addition to the function to proxy through to.
+      backups[x] = [cur, obj.hasOwnProperty(x)];
+      // Create the wrapper
+      obj[x] = Track.wrapper(obj, x, backups);
+    }
+  }
+};
+
+
+
+
+var Call = racetrack.Call = function(trackId, callId, name, args) {
   this.args = args;
-  this.count = idNum;
+  this.trackId = trackId;
+  this.id = callId;
   this.name = name;
-  this.descr = '[' + this.count + ':' + this.name + ']';
+  this.descr = '[' + this.trackId + ':' + this.id + ':' + this.name + ']';
 };
 
 Call.prototype.descr_ = function(opt_indent) {
@@ -187,19 +324,5 @@ Call.prototype.toString = function() {
 };
 
 Call.prototype.indent = function(spaces) {
-  return new Array(spaces * this.count).join(' ');
-};
-
-
-
-// Register in a mocha bdd test case
-racetrack.use = function(obj, cfg) {
-  beforeEach(function() {
-    racetrack.configure(obj, cfg);
-  });
-
-  afterEach(function() {
-    racetrack.report();
-    racetrack.reset();
-  });
+  return new Array(spaces * this.id).join(' ');
 };
