@@ -1,10 +1,15 @@
+[![build status](https://secure.travis-ci.org/gregrperkins/racetrack.png)](http://travis-ci.org/gregrperkins/racetrack)
+
 ## Racetrack
 
 Racetrack is a way to make sure that all your async calls are completed,
 and to find out where they went wrong if any of them are not completed.
 
-It's meant to be easy to drop in
+It's meant to be easy to drop in for classes that have a bunch of methods
+whose last parameter are all a function. Otherwise you'll have to preface
+each function with a trace hook.
 
+It's still pretty raw.
 
 #### Example output (within soyset mocha tests)
 
