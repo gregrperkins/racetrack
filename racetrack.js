@@ -350,5 +350,5 @@ Call.prototype.toString = function() {
 };
 
 Call.prototype.indent = function(spaces) {
-  return new Array(spaces * this.id).join(' ');
+  return new Array((spaces || 0) * this.id + 1).join(' ');
 };
